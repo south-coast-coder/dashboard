@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Data Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            text-align: center;
+            color: #333;
+        }
+        .metrics {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-around;
+            margin-bottom: 20px;
+        }
+        .metric {
+            text-align: center;
+            background-color: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px;
+            flex: 1 1 200px;
+        }
+        .chart-container {
+            width: 100%;
+            height: 600px;
+            margin: 20px auto;
+        }
+        #csvFileInput {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CSV Data Dashboard</h1>
+        <input type="file" id="csvFileInput" accept=".csv">
+        <h2>Sent Step Totals</h2>
+        <div id="sentStepTotals" class="metrics"></div>
+        <h2>Email and LinkedIn Totals</h2>
+        <div id="channelTotals" class="metrics"></div>
+        <div class="chart-container">
+            <canvas id="stepChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let chart;
+
+        document.getElementById('csvFileInput').addEventListener('change', handleFileSelect);
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const csvData = e.target.result;
+                processData(csvData);
+            };
+
+            reader.readAsText(file);
+        }
+
+        function processData(csvData) {
+            Papa.parse(csvData, {
+                header: true,
+                complete: function(results) {
+                    const data = results.data;
+                    updateMetrics(data);
+                    updateChart(data);
+                }
+            });
+        }
+
+        function updateMetrics(data) {
+            // Sent Step Totals
+            const sentStepTotals = {};
+            data.forEach(row => {
+                if (row.sentStep) {
+                    sentStepTotals[row.sentStep] = (sentStepTotals[row.sentStep] || 0) + 1;
+                }
+            });
+
+            const sentStepTotalsHtml = Object.entries(sentStepTotals)
+                .map(([step, total]) => `
+                    <div class="metric">
+                        <h3>Step ${step}</h3>
+                        <p>${total}</p>
+                    </div>
+                `).join('');
+            document.getElementById('sentStepTotals').innerHTML = sentStepTotalsHtml;
+
+            // Email and LinkedIn Totals
+            const channelTotals = {
+                email: {sent: 0, opened: 0, replied: 0},
+                linkedin: {sent: 0, opened: 0, replied: 0}
+            };
+
+            for (let i = 0; i <= 11; i++) {
+                const suffix = i === 0 ? '' : i;
+                data.forEach(row => {
+                    if (row[`sentAt${suffix}`]) channelTotals.email.sent++;
+                    if (row[`openedAt${suffix}`]) channelTotals.email.opened++;
+                    if (row[`repliedAt${suffix}`]) channelTotals.email.replied++;
+                    if (row[`linkedinSentAt${suffix}`]) channelTotals.linkedin.sent++;
+                    if (row[`linkedinOpenedAt${suffix}`]) channelTotals.linkedin.opened++;
+                    if (row[`linkedinRepliedAt${suffix}`]) channelTotals.linkedin.replied++;
+                });
+            }
+
+            const channelTotalsHtml = Object.entries(channelTotals)
+                .map(([channel, totals]) => Object.entries(totals)
+                    .map(([action, total]) => `
+                        <div class="metric">
+                            <h3>${channel.charAt(0).toUpperCase() + channel.slice(1)} ${action.charAt(0).toUpperCase() + action.slice(1)}</h3>
+                            <p>${total}</p>
+                        </div>
+                    `).join('')
+                ).join('');
+            document.getElementById('channelTotals').innerHTML = channelTotalsHtml;
+        }
+
+        function updateChart(data) {
+            const ctx = document.getElementById('stepChart').getContext('2d');
+
+            const steps = Array.from({length: 12}, (_, i) => i === 0 ? '' : i);
+            const emailActions = ['sentAt', 'repliedAt', 'openedAt', 'interestedAt', 'notInterestedAt', 'bouncedAt', 'unsubscribedAt'];
+            const linkedinActions = ['linkedinSentAt', 'linkedinOpenedAt', 'linkedinInterestedAt', 'linkedinNotInterestedAt', 'linkedinSendFailedAt', 'linkedinRepliedAt', 'linkedinInviteFailedAt'];
+
+            const datasets = [...emailActions, ...linkedinActions].map(action => ({
+                label: action,
+                data: steps.map(step => data.filter(row => row[`${action}${step}`]).length),
+                backgroundColor: getRandomColor(),
+            }));
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: steps.map(step => `Step ${step +1 || 1}`),
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            stacked: true,
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Actions per Step'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                    }
+                }
+            });
+        }
+
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+    </script>
+</body>
+</html>
